@@ -193,11 +193,13 @@ handshake_other_started(#hs_data{request_type=ReqType,
                                  add_flags=AddFlgs0,
                                  reject_flags=RejFlgs0,
                                  require_flags=ReqFlgs0}=HSData0) ->
+    ?debug({handshake_other_started,HSData0}),
     AddFlgs = convert_flags(AddFlgs0),
     RejFlgs = convert_flags(RejFlgs0),
     ReqFlgs = convert_flags(ReqFlgs0),
     {PreOtherFlags,NodeOrHost,Creation,SendNameVersion} = recv_name(HSData0),
     EDF = erts_internal:get_dflags(),
+    ?debug({handshake_other_started,edf,EDF}),
     PreThisFlags = make_this_flags(ReqType, AddFlgs, RejFlgs, NodeOrHost, EDF,
                                    PreOtherFlags),
     HSData1 = HSData0#hs_data{this_flags=PreThisFlags,
@@ -209,21 +211,31 @@ handshake_other_started(#hs_data{request_type=ReqType,
                               add_flags=AddFlgs,
                               reject_flags=RejFlgs,
                               require_flags=ReqFlgs},
+    ?debug({handshake_other_started,hs_data1,HSData1}),
     check_dflags(HSData1, EDF),
+    ?debug({handshake_other_started,check_flags_ok}),
     ?debug({"MD5 connection from ~p~n", [NodeOrHost]}),
     HSData2 = mark_pending(HSData1),
+    ?debug({handshake_other_started,mark_pending_ok,hs_data2,HSData2}),
     Node = HSData2#hs_data.other_node,
     {MyCookie,HisCookie} = get_cookies(Node),
+    ?debug({handshake_other_started,cookie,MyCookie,HisCookie}),
     ChallengeA = gen_challenge(),
+    ?debug({handshake_other_started,challenge_a,ChallengeA}),
     send_challenge(HSData2, ChallengeA),
+    ?debug({handshake_other_started,sent_challenge_a}),
     reset_timer(HSData2#hs_data.timer),
     HSData3 = recv_complement(HSData2, SendNameVersion),
+    ?debug({handshake_other_started,recv_complement_ok,hs_data3,HSData3}),
     check_dflags(HSData3, EDF),
+    ?debug({handshake_other_started,check_flags_hs_data_3_ok}),
     ChosenFlags = adjust_flags(HSData3#hs_data.this_flags,
                                HSData3#hs_data.other_flags),
     HSData4 = HSData3#hs_data{this_flags = ChosenFlags,
                               other_flags = ChosenFlags},
+    ?debug({handshake_other_started,hs_data4,HSData4}),
     ChallengeB = recv_challenge_reply(HSData4, ChallengeA, MyCookie),
+    ?debug({handshake_other_started,recv_challenge_reply_ok,challenge_b,ChallengeB}),
     send_challenge_ack(HSData4, gen_digest(ChallengeB, HisCookie)),
     ?debug({dist_util, self(), accept_connection, Node}),
     connection(HSData4);
@@ -341,6 +353,7 @@ wait_pending(Kernel) ->
     end.
 
 do_alive(#hs_data{other_node = Node} = HSData) ->
+    ?debug({dist_util,do_alive,{other_node,Node}}),
     send_status(HSData, alive),
     case recv_status_reply(HSData) of
 	true  -> true;
@@ -392,10 +405,12 @@ handshake_we_started(#hs_data{request_type=ReqType,
                               add_flags=AddFlgs0,
                               reject_flags=RejFlgs0,
                               require_flags=ReqFlgs0}=PreHSData) ->
+    ?debug({handshake_we_started,PreHSData}),
     AddFlgs = convert_flags(AddFlgs0),
     RejFlgs = convert_flags(RejFlgs0),
     ReqFlgs = convert_flags(ReqFlgs0),
     EDF = erts_internal:get_dflags(),
+    ?debug({dist_util,handshake_we_started,{edf,EDF}}),
     {NameMeFlg, NameToSend, MinVersion} =
         case node() of
             nonode@nohost ->
@@ -406,13 +421,16 @@ handshake_we_started(#hs_data{request_type=ReqType,
             _ ->
                 {0, MyNode, PreHSData#hs_data.other_version}
         end,
+    ?debug({dist_util,handshake_we_started,case_node,{NameMeFlg, NameToSend, MinVersion}}),
     PreThisFlags = make_this_flags(ReqType, AddFlgs, RejFlgs, Node, EDF, NameMeFlg),
+    ?debug({dist_util,handshake_we_started,{pre_this_flags,PreThisFlags}}),
     HSData = PreHSData#hs_data{this_node = NameToSend,
                                this_flags = PreThisFlags,
                                other_version = MinVersion,
                                add_flags = AddFlgs,
                                reject_flags = RejFlgs,
                                require_flags = ReqFlgs},
+    ?debug({dist_util,handshake_we_started,{latest_hs_data,HSData}}),
     SendNameVersion = send_name(HSData),
     HSData1 = recv_status(HSData),
     {PreOtherFlags, ChallengeA, Creation} = recv_challenge(HSData1),
@@ -658,6 +676,7 @@ send_name(#hs_data{socket = Socket, this_node = Node,
 		   f_send = FSend, 
 		   this_flags = Flags,
 		   other_version = Version}) ->
+    ?debug({dist_util,send_name,Node,Flags,Version}),
     NameBin = to_binary(Node),
     if Version =:= undefined;
        Version =:= ?ERL_DIST_VER_5 ->
@@ -755,17 +774,20 @@ send_challenge_ack(#hs_data{socket = Socket, f_send = FSend},
 %% Close the connection if invalid data.
 %%
 recv_name(#hs_data{socket = Socket, f_recv = Recv} = HSData) ->
+    ?debug({dist_util,recv_name}),
     case Recv(Socket, 0, infinity) of
         {ok, [$n | _] = Data} ->
             recv_name_old(HSData, Data);
         {ok, [$N | _] = Data} ->
             recv_name_new(HSData, Data);
-	_ ->
+	Error ->
+      ?debug({dist_util,recv_name_error,Error}),
 	    ?shutdown(no_node)
     end.
 
 recv_name_old(HSData,
              [$n, V1, V0, F3, F2, F1, F0 | Node] = Data) ->
+    ?debug({dist_util,recv_name_old}),
     <<_Version:16>> = <<V1,V0>>,
     <<Flags:32>> = <<F3,F2,F1,F0>>,
     ?trace("recv_name: 'n' node=~p version=~w\n", [Node, _Version]),
@@ -774,12 +796,14 @@ recv_name_old(HSData,
             check_allowed(HSData, Node),
             {Flags, list_to_atom(Node), ?CREATION_UNKNOWN, ?ERL_DIST_VER_5};
         false ->
+            ?debug({dist_util,recv_name_old_error}),
             ?shutdown(Data)
     end.
 
 recv_name_new(HSData,
              [$N, F7,F6,F5,F4,F3,F2,F1,F0, Cr3,Cr2,Cr1,Cr0,
               NL1, NL0 | Rest] = Data) ->
+    ?debug({dist_util,recv_name_new}),
     <<Flags:64>> = <<F7,F6,F5,F4,F3,F2,F1,F0>>,
     <<Creation:32>> = <<Cr3,Cr2,Cr1,Cr0>>,
     <<NameLen:16>> = <<NL1,NL0>>,
@@ -1063,6 +1087,7 @@ recv_challenge_ack(#hs_data{socket = Socket, f_recv = FRecv,
 recv_status(#hs_data{kernel_pid = Kernel, socket = Socket, 
                      this_flags = MyFlgs,
 		     other_node = Node, f_recv = Recv} = HSData) ->
+    ?debug({dist_util,recv_status}),
     case Recv(Socket, 0, infinity) of
         {ok, "snamed:"++Rest} ->
             <<NameLen:16,
@@ -1116,6 +1141,7 @@ recv_status(#hs_data{kernel_pid = Kernel, socket = Socket,
 recv_status_reply(#hs_data{socket = Socket,
                            other_node = Node,
                            f_recv = Recv}) ->
+    ?debug({dist_util,recv_status_reply}),
     case Recv(Socket, 0, infinity) of
 	{ok, [$s|Stat]} ->
 	    ?debug({dist_util,self(),recv_status, Node, Stat}),
