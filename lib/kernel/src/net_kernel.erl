@@ -385,8 +385,8 @@ start_link([Name, LongOrShortNames, Ticktime], CleanHalt, NetSup) ->
 	    {ok, Pid};
 	{error, {already_started, Pid}} ->
 	    {ok, Pid};
-	_Error ->
-	    exit(nodistribution)
+	Error ->
+	    exit(Error)
     end.
 
 init({Name, LongOrShortNames, TickT, CleanHalt, NetSup}) ->
